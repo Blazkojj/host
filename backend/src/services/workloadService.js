@@ -11,7 +11,7 @@ import { ApiError } from "../utils/apiError.js";
 import { detectBotConfig } from "../utils/detectBotConfig.js";
 import { detectRuntime } from "../utils/detectRuntime.js";
 import { generateBotDockerfile } from "../utils/dockerfile.js";
-import { ensureDir, extractZipSafely, removeIfExists, setOwnershipRecursive, writeTextFile } from "../utils/fs.js";
+import { ensureDir, extractZipSafely, removeIfExists, setModeRecursive, setOwnershipRecursive, writeTextFile } from "../utils/fs.js";
 import { slugify } from "../utils/slug.js";
 
 const botSchema = z.object({
@@ -280,11 +280,17 @@ const prepareWorkloadDirs = async (workloadId) => {
 };
 
 const applyRuntimeOwnership = async (targetPath, runtimeUid) => {
-  if (!runtimeUid || process.platform === "win32") {
+  if (process.platform === "win32") {
     return;
   }
 
-  await setOwnershipRecursive(targetPath, runtimeUid, runtimeUid);
+  if (runtimeUid) {
+    await setOwnershipRecursive(targetPath, runtimeUid, runtimeUid);
+  }
+
+  // Proxmox LXC / user namespace setups can still reject writes even after chown.
+  // Relaxing the data directory mode keeps game and bot containers writable on bind mounts.
+  await setModeRecursive(targetPath, 0o777, 0o666);
 };
 
 const createContainer = async ({

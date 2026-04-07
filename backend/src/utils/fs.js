@@ -22,6 +22,21 @@ export const setOwnershipRecursive = async (targetPath, uid, gid = uid) => {
   }
 };
 
+export const setModeRecursive = async (targetPath, directoryMode = 0o777, fileMode = 0o666) => {
+  const stat = await fs.lstat(targetPath);
+  await fs.chmod(targetPath, stat.isDirectory() ? directoryMode : fileMode);
+
+  if (!stat.isDirectory()) {
+    return;
+  }
+
+  const entries = await fs.readdir(targetPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    await setModeRecursive(path.join(targetPath, entry.name), directoryMode, fileMode);
+  }
+};
+
 const assertSafePath = (rootPath, entryName) => {
   const normalized = path.normalize(entryName);
 
