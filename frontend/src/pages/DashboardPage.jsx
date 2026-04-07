@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext.jsx";
+import { getEndpointAddress, getPrimaryBinding } from "../utils/endpoints.js";
 
 const statusClass = (status) => `status-badge status-${status}`;
 
@@ -31,6 +32,8 @@ export default function DashboardPage() {
   const ramAllocated = workloads.reduce((sum, item) => sum + Number(item.memory_mb || 0), 0);
   const cpuAllocated = workloads.reduce((sum, item) => sum + Number(item.cpu_limit || 0), 0);
   const storageAllocated = workloads.reduce((sum, item) => sum + Number(item.storage_mb || 0), 0);
+  const featuredServer = servers[0] || null;
+  const featuredEndpoint = getEndpointAddress(getPrimaryBinding(featuredServer?.port_bindings || []));
 
   return (
     <div className="page-grid">
@@ -42,6 +45,28 @@ export default function DashboardPage() {
       </header>
 
       {error ? <div className="notice error">{error}</div> : null}
+
+      <section className="hero-panel">
+        <div className="hero-copy">
+          <span className="eyebrow">Private LAN Hosting</span>
+          <h2>One panel for bots, Minecraft and game servers running in real Docker containers.</h2>
+          <p>
+            Inspired by commercial hosting layouts, but focused on your own network. Create a server, copy the join address and connect directly from your LAN.
+          </p>
+          <div className="hero-pills">
+            <span className="hero-pill">Docker limits enforced</span>
+            <span className="hero-pill">Live logs</span>
+            <span className="hero-pill">Private network ready</span>
+          </div>
+        </div>
+
+        <div className="hero-card">
+          <span className="eyebrow">Quick connect</span>
+          <strong>{featuredServer ? featuredServer.name : "No server yet"}</strong>
+          <p>{featuredEndpoint ? "Use this address from any device in your local network." : "Create your first server to get a join address here."}</p>
+          <div className="hero-endpoint mono">{featuredEndpoint || "192.168.0.79:25565"}</div>
+        </div>
+      </section>
 
       <section className="stats-grid">
         <article className="stat-card">
@@ -114,6 +139,7 @@ export default function DashboardPage() {
               <th>Type</th>
               <th>Status</th>
               <th>Ports</th>
+              <th>Join address</th>
               <th>Limits</th>
             </tr>
           </thead>
@@ -129,12 +155,13 @@ export default function DashboardPage() {
                   <span className={statusClass(workload.status)}>{workload.status}</span>
                 </td>
                 <td className="mono">{renderPorts(workload.port_bindings)}</td>
+                <td className="mono">{getEndpointAddress(getPrimaryBinding(workload.port_bindings || [])) || "Not exposed"}</td>
                 <td>{workload.memory_mb} MB / {Number(workload.cpu_limit).toFixed(2)} CPU / {workload.storage_mb} MB</td>
               </tr>
             ))}
             {workloads.length === 0 ? (
               <tr>
-                <td colSpan="5" className="muted">No workloads provisioned yet.</td>
+                <td colSpan="6" className="muted">No workloads provisioned yet.</td>
               </tr>
             ) : null}
           </tbody>

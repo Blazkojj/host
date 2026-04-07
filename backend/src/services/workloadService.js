@@ -15,6 +15,7 @@ import { slugify } from "../utils/slug.js";
 
 const botSchema = z.object({
   name: z.string().min(2).max(64),
+  token: z.string().min(10).max(400).optional(),
   startupCommand: z.string().min(1).max(300).optional(),
   envLines: z.string().max(8000).optional(),
   ports: z.string().max(4000).optional(),
@@ -399,6 +400,12 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
     const runtime = detected.runtime;
     const startupCommand = parsed.startupCommand || detected.startupCommand;
     const envMap = parseEnvLines(parsed.envLines || "");
+
+    if (parsed.token) {
+      envMap.TOKEN ??= parsed.token;
+      envMap.DISCORD_TOKEN ??= parsed.token;
+    }
+
     const bindings = await allocatePorts(parsePorts(parsed.ports || ""));
     const dockerfile = generateBotDockerfile({ runtime, startupCommand });
 

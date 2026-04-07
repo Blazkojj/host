@@ -16,22 +16,48 @@ export const detectRuntime = async (sourcePath) => {
   const requirementsPath = path.join(sourcePath, "requirements.txt");
   const pyprojectPath = path.join(sourcePath, "pyproject.toml");
   const indexJsPath = path.join(sourcePath, "index.js");
+  const mainJsPath = path.join(sourcePath, "main.js");
+  const botJsPath = path.join(sourcePath, "bot.js");
+  const srcIndexJsPath = path.join(sourcePath, "src", "index.js");
   const mainPyPath = path.join(sourcePath, "main.py");
   const appPyPath = path.join(sourcePath, "app.py");
+  const botPyPath = path.join(sourcePath, "bot.py");
 
   if (await exists(packageJsonPath)) {
     const parsed = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
 
     return {
       runtime: "node",
-      startupCommand: parsed.scripts?.start ? "npm start" : (await exists(indexJsPath) ? "node index.js" : "node .")
+      startupCommand: parsed.scripts?.start
+        ? "npm start"
+        : (await exists(indexJsPath))
+          ? "node index.js"
+          : (await exists(mainJsPath))
+            ? "node main.js"
+            : (await exists(botJsPath))
+              ? "node bot.js"
+              : (await exists(srcIndexJsPath))
+                ? "node src/index.js"
+                : "node ."
     };
   }
 
-  if ((await exists(requirementsPath)) || (await exists(pyprojectPath)) || (await exists(mainPyPath)) || (await exists(appPyPath))) {
+  if (
+    (await exists(requirementsPath)) ||
+    (await exists(pyprojectPath)) ||
+    (await exists(mainPyPath)) ||
+    (await exists(appPyPath)) ||
+    (await exists(botPyPath))
+  ) {
     return {
       runtime: "python",
-      startupCommand: (await exists(mainPyPath)) ? "python main.py" : (await exists(appPyPath) ? "python app.py" : "python -m app")
+      startupCommand: (await exists(mainPyPath))
+        ? "python main.py"
+        : (await exists(botPyPath))
+          ? "python bot.py"
+          : (await exists(appPyPath))
+            ? "python app.py"
+            : "python -m app"
     };
   }
 

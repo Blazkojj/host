@@ -10,6 +10,7 @@ const navItems = [
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const panelAddress = typeof window !== "undefined" ? window.location.host : "localhost";
 
   return (
     <div className="app-shell">
@@ -18,8 +19,14 @@ export default function Layout() {
           <div className="brand-mark">HP</div>
           <div>
             <strong>HostPanel</strong>
-            <p>Docker hosting</p>
+            <p>Private game & bot hosting</p>
           </div>
+        </div>
+
+        <div className="sidebar-highlight">
+          <span className="eyebrow">Panel address</span>
+          <strong className="mono">{panelAddress}</strong>
+          <p>Use this LAN address to open the panel and join provisioned servers from your network.</p>
         </div>
 
         <nav className="nav">

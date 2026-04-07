@@ -17,9 +17,9 @@ export default function BotsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: "",
+    token: "",
     startupCommand: "",
     envLines: "",
-    ports: "",
     memoryMb: "512",
     cpuLimit: "1",
     storageMb: "2048",
@@ -62,9 +62,9 @@ export default function BotsPage() {
     try {
       const payload = new FormData();
       payload.append("name", form.name);
+      payload.append("token", form.token);
       payload.append("startupCommand", form.startupCommand);
       payload.append("envLines", form.envLines);
-      payload.append("ports", form.ports);
       payload.append("memoryMb", form.memoryMb);
       payload.append("cpuLimit", form.cpuLimit);
       payload.append("storageMb", form.storageMb);
@@ -80,9 +80,9 @@ export default function BotsPage() {
       setNotice("Bot container created and started.");
       setForm({
         name: "",
+        token: "",
         startupCommand: "",
         envLines: "",
-        ports: "",
         memoryMb: "512",
         cpuLimit: "1",
         storageMb: "2048",
@@ -145,7 +145,7 @@ export default function BotsPage() {
         <div className="panel-header">
           <div>
             <h3>Create bot</h3>
-            <p>Supported runtimes: Node.js and Python. The backend generates a Dockerfile and builds a dedicated image.</p>
+            <p>Upload ZIP, wklej token i panel sam wykryje Node.js albo Python. Dla zwyklego Discord bota nie potrzebujesz publicznych portow.</p>
           </div>
         </div>
 
@@ -164,31 +164,33 @@ export default function BotsPage() {
 
           <div className="form-grid">
             <label className="field">
-              <span>Startup command override</span>
+              <span>Discord token</span>
               <input
-                placeholder="Optional, for example npm start or python bot.py"
-                value={form.startupCommand}
-                onChange={(event) => setForm({ ...form, startupCommand: event.target.value })}
+                type="password"
+                placeholder="Wklej token bota"
+                value={form.token}
+                onChange={(event) => setForm({ ...form, token: event.target.value })}
+                required
               />
             </label>
 
             <label className="field">
-              <span>Public ports</span>
+              <span>Extra environment variables</span>
               <textarea
-                placeholder={"8080:8080/tcp\n25565/tcp"}
-                value={form.ports}
-                onChange={(event) => setForm({ ...form, ports: event.target.value })}
+                placeholder={"CLIENT_ID=...\nGUILD_ID=..."}
+                value={form.envLines}
+                onChange={(event) => setForm({ ...form, envLines: event.target.value })}
               />
             </label>
           </div>
 
           <div className="form-grid">
             <label className="field">
-              <span>Environment variables</span>
-              <textarea
-                placeholder={"TOKEN=...\nNODE_ENV=production"}
-                value={form.envLines}
-                onChange={(event) => setForm({ ...form, envLines: event.target.value })}
+              <span>Startup command override</span>
+              <input
+                placeholder="Opcjonalne, np. npm start albo python bot.py"
+                value={form.startupCommand}
+                onChange={(event) => setForm({ ...form, startupCommand: event.target.value })}
               />
             </label>
 
@@ -224,6 +226,10 @@ export default function BotsPage() {
             <button type="submit" className="button" disabled={submitting}>
               {submitting ? "Building image..." : "Create bot"}
             </button>
+          </div>
+
+          <div className="notice">
+            Jezyk i domyslny plik startowy sa wykrywane automatycznie. Token nie powinien byc odczytywany z pliku w kodzie, tylko przekazywany jako zmienna srodowiskowa.
           </div>
         </form>
       </section>

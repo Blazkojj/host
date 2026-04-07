@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext.jsx";
 import LogConsole from "../components/LogConsole.jsx";
+import { getEndpointAddress, getEndpointList, getPrimaryBinding } from "../utils/endpoints.js";
 
 const statusClass = (status) => `status-badge status-${status}`;
 
@@ -60,6 +61,28 @@ export default function ServersPage() {
   }, [form.templateKey, selectedId]);
 
   const activeTemplate = templates.find((item) => item.id === form.templateKey);
+
+  const copyToClipboard = async (value) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = value;
+        input.setAttribute("readonly", "");
+        input.style.position = "absolute";
+        input.style.left = "-9999px";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        document.body.removeChild(input);
+      }
+
+      setNotice(`Copied: ${value}`);
+    } catch {
+      setError("Unable to copy address.");
+    }
+  };
 
   const handleTemplateChange = (templateKey) => {
     const template = templates.find((item) => item.id === templateKey);
@@ -140,12 +163,50 @@ export default function ServersPage() {
       <header className="page-header">
         <div>
           <h1>Game servers</h1>
-          <p>Provision real server containers from curated templates. Each template maps ports, entrypoints and persistent data volumes.</p>
+          <p>Provision real server containers from curated templates. Each one gets its own LAN join address you can copy straight from the panel.</p>
         </div>
       </header>
 
       {notice ? <div className="notice">{notice}</div> : null}
       {error ? <div className="notice error">{error}</div> : null}
+
+      <section className="server-grid">
+        {workloads.slice(0, 3).map((workload) => {
+          const primaryBinding = getPrimaryBinding(workload.port_bindings || []);
+          const endpoint = getEndpointAddress(primaryBinding);
+
+          return (
+            <article key={workload.id} className="server-card">
+              <div className="server-card-top">
+                <div>
+                  <span className="eyebrow">{workload.template_key}</span>
+                  <h3>{workload.name}</h3>
+                </div>
+                <span className={statusClass(workload.status)}>{workload.status}</span>
+              </div>
+
+              <div className="server-endpoint mono">{endpoint || "No public port yet"}</div>
+              <p>{endpoint ? "Players on your network can join using this address." : "This server has no exposed join port yet."}</p>
+
+              <div className="button-row">
+                <button type="button" className="button" onClick={() => endpoint && copyToClipboard(endpoint)} disabled={!endpoint}>
+                  Copy address
+                </button>
+                <button type="button" className="button button-ghost" onClick={() => setSelectedId(workload.id)}>
+                  Open logs
+                </button>
+              </div>
+            </article>
+          );
+        })}
+        {workloads.length === 0 ? (
+          <article className="server-card server-card-empty">
+            <span className="eyebrow">No servers yet</span>
+            <h3>Create your first private server</h3>
+            <p>As soon as one is provisioned, its LAN join address will appear here.</p>
+          </article>
+        ) : null}
+      </section>
 
       <section className="panel">
         <div className="panel-header">
@@ -239,13 +300,19 @@ export default function ServersPage() {
               <th>Template</th>
               <th>Status</th>
               <th>Ports</th>
+              <th>Join</th>
               <th>Limits</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {workloads.map((workload) => (
-              <tr key={workload.id}>
+            {workloads.map((workload) => {
+              const primaryBinding = getPrimaryBinding(workload.port_bindings || []);
+              const endpoint = getEndpointAddress(primaryBinding);
+              const endpointList = getEndpointList(workload.port_bindings || []);
+
+              return (
+                <tr key={workload.id}>
                 <td className="stack">
                   <strong>{workload.name}</strong>
                   <span className="mono muted">{workload.container_name}</span>
@@ -255,9 +322,20 @@ export default function ServersPage() {
                   <span className={statusClass(workload.status)}>{workload.status}</span>
                 </td>
                 <td className="mono">{formatPorts(workload.port_bindings)}</td>
+                <td className="stack">
+                  <strong className="mono">{endpoint || "No join address"}</strong>
+                  {endpointList.slice(1).map((item) => (
+                    <span key={`${workload.id}-${item.hostPort}-${item.protocol}`} className="mono muted">
+                      {item.address}
+                    </span>
+                  ))}
+                </td>
                 <td>{workload.memory_mb} MB / {Number(workload.cpu_limit).toFixed(2)} CPU / {workload.storage_mb} MB</td>
                 <td>
                   <div className="inline-actions">
+                    <button type="button" className="button" onClick={() => endpoint && copyToClipboard(endpoint)} disabled={!endpoint}>
+                      Copy IP
+                    </button>
                     <button type="button" className="button button-ghost" onClick={() => setSelectedId(workload.id)}>
                       Logs
                     </button>
@@ -275,11 +353,12 @@ export default function ServersPage() {
                     </button>
                   </div>
                 </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
             {workloads.length === 0 ? (
               <tr>
-                <td colSpan="6" className="muted">No game servers created yet.</td>
+                <td colSpan="7" className="muted">No game servers created yet.</td>
               </tr>
             ) : null}
           </tbody>
