@@ -7,6 +7,21 @@ export const ensureDir = async (dirPath) => {
   await fs.mkdir(dirPath, { recursive: true });
 };
 
+export const setOwnershipRecursive = async (targetPath, uid, gid = uid) => {
+  const stat = await fs.lstat(targetPath);
+  await fs.chown(targetPath, uid, gid);
+
+  if (!stat.isDirectory()) {
+    return;
+  }
+
+  const entries = await fs.readdir(targetPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    await setOwnershipRecursive(path.join(targetPath, entry.name), uid, gid);
+  }
+};
+
 const assertSafePath = (rootPath, entryName) => {
   const normalized = path.normalize(entryName);
 

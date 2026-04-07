@@ -22,9 +22,21 @@ export const detectRuntime = async (sourcePath) => {
   const mainPyPath = path.join(sourcePath, "main.py");
   const appPyPath = path.join(sourcePath, "app.py");
   const botPyPath = path.join(sourcePath, "bot.py");
+  const toRelative = (targetPath) => path.relative(sourcePath, targetPath).replace(/\\/g, "/");
 
   if (await exists(packageJsonPath)) {
     const parsed = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    const entryFile = parsed.scripts?.start
+      ? "package.json:scripts.start"
+      : (await exists(indexJsPath))
+        ? toRelative(indexJsPath)
+        : (await exists(mainJsPath))
+          ? toRelative(mainJsPath)
+          : (await exists(botJsPath))
+            ? toRelative(botJsPath)
+            : (await exists(srcIndexJsPath))
+              ? toRelative(srcIndexJsPath)
+              : "auto";
 
     return {
       runtime: "node",
@@ -35,10 +47,11 @@ export const detectRuntime = async (sourcePath) => {
           : (await exists(mainJsPath))
             ? "node main.js"
             : (await exists(botJsPath))
-              ? "node bot.js"
-              : (await exists(srcIndexJsPath))
-                ? "node src/index.js"
-                : "node ."
+            ? "node bot.js"
+            : (await exists(srcIndexJsPath))
+              ? "node src/index.js"
+              : "node .",
+      entryFile
     };
   }
 
@@ -49,6 +62,16 @@ export const detectRuntime = async (sourcePath) => {
     (await exists(appPyPath)) ||
     (await exists(botPyPath))
   ) {
+    const entryFile = (await exists(mainPyPath))
+      ? toRelative(mainPyPath)
+      : (await exists(botPyPath))
+        ? toRelative(botPyPath)
+        : (await exists(appPyPath))
+          ? toRelative(appPyPath)
+          : (await exists(pyprojectPath))
+            ? toRelative(pyprojectPath)
+            : "auto";
+
     return {
       runtime: "python",
       startupCommand: (await exists(mainPyPath))
@@ -57,7 +80,8 @@ export const detectRuntime = async (sourcePath) => {
           ? "python bot.py"
           : (await exists(appPyPath))
             ? "python app.py"
-            : "python -m app"
+            : "python -m app",
+      entryFile
     };
   }
 

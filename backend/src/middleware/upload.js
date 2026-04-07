@@ -15,7 +15,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const fileFilter = (_req, file, cb) => {
+const archiveFileFilter = (_req, file, cb) => {
   if (path.extname(file.originalname).toLowerCase() !== ".zip") {
     cb(new ApiError(400, "Only ZIP archives are supported."));
     return;
@@ -26,7 +26,27 @@ const fileFilter = (_req, file, cb) => {
 
 export const uploadArchive = multer({
   storage,
-  fileFilter,
+  fileFilter: archiveFileFilter,
+  limits: {
+    fileSize: env.uploadLimitMb * 1024 * 1024
+  }
+});
+
+const assetFileFilter = (_req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowed = new Set([".zip", ".jar", ".yml", ".yaml", ".json", ".toml", ".txt", ".properties", ".dat", ".nbt"]);
+
+  if (!allowed.has(ext)) {
+    cb(new ApiError(400, "Unsupported asset file type."));
+    return;
+  }
+
+  cb(null, true);
+};
+
+export const uploadAsset = multer({
+  storage,
+  fileFilter: assetFileFilter,
   limits: {
     fileSize: env.uploadLimitMb * 1024 * 1024
   }

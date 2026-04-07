@@ -10,8 +10,7 @@ MEMORY="${JAVA_MEMORY:-1024M}"
 mkdir -p "$DATA_DIR" "$SERVER_DIR"
 cd "$DATA_DIR"
 
-printf 'eula=%s\n' "${EULA:-FALSE}" > eula.txt
-
+printf 'eula=%s\n' "$(printf '%s' "${EULA:-FALSE}" | tr '[:upper:]' '[:lower:]')" > eula.txt
 if [ ! -f "$SERVER_DIR/server.jar" ]; then
   if [ "$BUILD" = "latest" ]; then
     BUILD="$(curl -fsSL "https://api.papermc.io/v2/projects/paper/versions/${VERSION}" | jq -r '.builds[-1]')"

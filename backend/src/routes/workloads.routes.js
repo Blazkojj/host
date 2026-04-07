@@ -1,6 +1,6 @@
 import express from "express";
 import { authMiddleware } from "../middleware/auth.js";
-import { uploadArchive } from "../middleware/upload.js";
+import { uploadArchive, uploadAsset } from "../middleware/upload.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   createBotWorkload,
@@ -11,7 +11,9 @@ import {
   listUserWorkloads,
   restartWorkload,
   startWorkload,
-  stopWorkload
+  stopWorkload,
+  updateWorkloadSettings,
+  uploadWorkloadAsset
 } from "../services/workloadService.js";
 
 const router = express.Router();
@@ -105,6 +107,34 @@ router.get(
     });
 
     res.json({ logs });
+  })
+);
+
+router.patch(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const workload = await updateWorkloadSettings({
+      workloadId: req.params.id,
+      user: req.user,
+      input: req.body
+    });
+
+    res.json({ workload });
+  })
+);
+
+router.post(
+  "/:id/assets",
+  uploadAsset.single("asset"),
+  asyncHandler(async (req, res) => {
+    const result = await uploadWorkloadAsset({
+      workloadId: req.params.id,
+      user: req.user,
+      file: req.file,
+      assetType: req.body.assetType
+    });
+
+    res.json(result);
   })
 );
 

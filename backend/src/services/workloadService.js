@@ -8,9 +8,10 @@ import { buildImage, docker, ensureDockerNetwork, inspectImage } from "../docker
 import { assertUserCanHost, assertWithinQuota } from "./quotaService.js";
 import { getTemplate, listTemplates } from "./templates.js";
 import { ApiError } from "../utils/apiError.js";
+import { detectBotConfig } from "../utils/detectBotConfig.js";
 import { detectRuntime } from "../utils/detectRuntime.js";
 import { generateBotDockerfile } from "../utils/dockerfile.js";
-import { ensureDir, extractZipSafely, removeIfExists, writeTextFile } from "../utils/fs.js";
+import { ensureDir, extractZipSafely, removeIfExists, setOwnershipRecursive, writeTextFile } from "../utils/fs.js";
 import { slugify } from "../utils/slug.js";
 
 const botSchema = z.object({
@@ -33,6 +34,17 @@ const serverSchema = z.object({
   memoryMb: z.coerce.number().int().min(512).max(65536),
   cpuLimit: z.coerce.number().min(0.5).max(64),
   storageMb: z.coerce.number().int().min(1024).max(512000)
+});
+
+const updateWorkloadSchema = z.object({
+  name: z.string().min(2).max(64).optional(),
+  token: z.string().min(10).max(400).optional().or(z.literal("")),
+  startupCommand: z.string().min(1).max(300).optional().or(z.literal("")),
+  envLines: z.string().max(8000).optional(),
+  autoRestart: z.coerce.boolean().optional(),
+  memoryMb: z.coerce.number().int().min(128).max(65536).optional(),
+  cpuLimit: z.coerce.number().min(0.25).max(64).optional(),
+  storageMb: z.coerce.number().int().min(512).max(512000).optional()
 });
 
 const parseEnvLines = (rawLines = "") => {
@@ -99,6 +111,25 @@ const parsePorts = (rawPorts = "") => {
 };
 
 const formatEnvArray = (envMap) => Object.entries(envMap).map(([key, value]) => `${key}=${value}`);
+
+const applyTokenToEnvMap = (envMap, token, configMeta = {}) => {
+  if (!token) {
+    return envMap;
+  }
+
+  const next = { ...envMap };
+  const tokenKeys = Array.isArray(configMeta.detectedTokenKeys) && configMeta.detectedTokenKeys.length > 0
+    ? configMeta.detectedTokenKeys
+    : ["TOKEN", "DISCORD_TOKEN"];
+
+  for (const key of tokenKeys) {
+    next[key] = token;
+  }
+
+  next.TOKEN ??= token;
+  next.DISCORD_TOKEN ??= token;
+  return next;
+};
 
 const countAutoPorts = (definitions) => definitions.filter((item) => !item.hostPort).length;
 
@@ -248,6 +279,14 @@ const prepareWorkloadDirs = async (workloadId) => {
   return { root, sourcePath, dataPath };
 };
 
+const applyRuntimeOwnership = async (targetPath, runtimeUid) => {
+  if (!runtimeUid || process.platform === "win32") {
+    return;
+  }
+
+  await setOwnershipRecursive(targetPath, runtimeUid, runtimeUid);
+};
+
 const createContainer = async ({
   workloadId,
   userId,
@@ -261,11 +300,12 @@ const createContainer = async ({
   storageMb,
   autoRestart,
   binds,
-  startupCommand
+  startupCommand,
+  containerNameOverride
 }) => {
   await ensureDockerNetwork();
 
-  const containerName = `${kind}-${slugify(name)}-${workloadId.slice(0, 8)}`;
+  const containerName = containerNameOverride || `${kind}-${slugify(name)}-${workloadId.slice(0, 8)}`;
   const container = await docker.createContainer({
     name: containerName,
     Image: image,
@@ -307,6 +347,83 @@ const createContainer = async ({
 
   await container.start();
   return { container, containerName };
+};
+
+const getBindsForWorkload = (workload) => {
+  if (workload.kind === "bot") {
+    return [`${workload.data_path}:/srv/app/data`];
+  }
+
+  const template = getTemplate(workload.template_key);
+
+  if (!template) {
+    throw new ApiError(400, "Unknown server template.");
+  }
+
+  return [`${workload.data_path}:${template.mountPath}`];
+};
+
+const rebuildContainerForWorkload = async ({
+  workload,
+  name,
+  envMap,
+  startupCommand,
+  memoryMb,
+  cpuLimit,
+  storageMb,
+  autoRestart
+}) => {
+  if (workload.container_id) {
+    const oldContainer = docker.getContainer(workload.container_id);
+
+    try {
+      await oldContainer.stop({ t: 10 });
+    } catch (error) {
+      if (![304, 404].includes(error.statusCode)) {
+        throw error;
+      }
+    }
+
+    try {
+      await oldContainer.remove({ force: true });
+    } catch (error) {
+      if (error.statusCode !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  return createContainer({
+    workloadId: workload.id,
+    userId: workload.user_id,
+    name,
+    kind: workload.kind,
+    image: workload.image,
+    envMap,
+    bindings: workload.port_bindings || [],
+    memoryMb,
+    cpuLimit,
+    storageMb,
+    autoRestart,
+    binds: getBindsForWorkload(workload),
+    startupCommand
+  });
+};
+
+const getMinecraftUploadTargets = (template) => {
+  const uploads = template?.capabilities?.uploads || [];
+
+  return {
+    plugins: uploads.includes("plugins") ? path.join("plugins") : null,
+    mods: uploads.includes("mods") ? path.join("mods") : null,
+    world: uploads.includes("world") ? path.join("world") : null,
+    configs: uploads.includes("configs") ? path.join("") : null
+  };
+};
+
+const copyFileInto = async (fromPath, toPath) => {
+  await ensureDir(path.dirname(toPath));
+  await fs.copyFile(fromPath, toPath);
 };
 
 const assertOwnership = (workload, user) => {
@@ -372,7 +489,13 @@ export const listTemplatesForApi = () =>
     name: template.name,
     description: template.description,
     defaultEnv: template.defaultEnv,
-    ports: template.ports
+    ports: template.ports,
+    capabilities: template.capabilities || {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    }
   }));
 
 export const createBotWorkload = async ({ user, input, archiveFile }) => {
@@ -395,19 +518,25 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
 
   try {
     await extractZipSafely(archiveFile.path, directories.sourcePath);
+    await applyRuntimeOwnership(directories.dataPath, 10001);
 
     const detected = await detectRuntime(directories.sourcePath);
+    const detectedBotConfig = await detectBotConfig(directories.sourcePath);
     const runtime = detected.runtime;
     const startupCommand = parsed.startupCommand || detected.startupCommand;
-    const envMap = parseEnvLines(parsed.envLines || "");
-
-    if (parsed.token) {
-      envMap.TOKEN ??= parsed.token;
-      envMap.DISCORD_TOKEN ??= parsed.token;
-    }
+    const initialEnvMap = parseEnvLines(parsed.envLines || "");
+    const fallbackToken = parsed.token || detectedBotConfig.detectedTokenValue || "";
+    const envMap = applyTokenToEnvMap(initialEnvMap, fallbackToken, detectedBotConfig);
 
     const bindings = await allocatePorts(parsePorts(parsed.ports || ""));
     const dockerfile = generateBotDockerfile({ runtime, startupCommand });
+    const configMeta = {
+      ...detectedBotConfig,
+      detectedRuntime: runtime,
+      autoDetectedStartup: detected.startupCommand,
+      detectedEntryFile: detected.entryFile,
+      tokenConfigured: Boolean(fallbackToken)
+    };
 
     await writeTextFile(path.join(directories.sourcePath, "Dockerfile"), dockerfile);
     await writeTextFile(path.join(directories.sourcePath, ".dockerignore"), "node_modules\n__pycache__\n.git\n");
@@ -450,6 +579,7 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
           data_path,
           startup_command,
           env,
+          config_meta,
           port_bindings,
           status,
           auto_restart,
@@ -459,7 +589,7 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
         )
         VALUES (
           $1, $2, $3, 'bot', $4, $5, $6, $7, $8, $9, $10, $11,
-          $12::jsonb, $13::jsonb, 'running', $14, $15, $16, $17
+          $12::jsonb, $13::jsonb, $14::jsonb, 'running', $15, $16, $17, $18
         )
         RETURNING *
       `,
@@ -476,6 +606,7 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
         directories.dataPath,
         startupCommand,
         JSON.stringify(envMap),
+        JSON.stringify(configMeta),
         JSON.stringify(bindings),
         parsed.autoRestart,
         parsed.memoryMb,
@@ -513,10 +644,21 @@ export const createServerWorkload = async ({ user, input }) => {
   const directories = await prepareWorkloadDirs(workloadId);
 
   try {
+    await applyRuntimeOwnership(directories.dataPath, template.runtimeUid);
+
     const image = await ensureTemplateImage(template);
     const envMap = {
       ...template.defaultEnv,
       ...parseEnvLines(parsed.envLines || "")
+    };
+    const configMeta = {
+      capabilities: template.capabilities || {},
+      panelHints: template.capabilities?.minecraft
+        ? {
+            plugins: template.capabilities.plugins,
+            mods: template.capabilities.mods
+          }
+        : {}
     };
     const bindings = await allocatePorts(template.ports.map((item) => ({ ...item, hostPort: null })));
 
@@ -549,6 +691,7 @@ export const createServerWorkload = async ({ user, input }) => {
           source_path,
           data_path,
           env,
+          config_meta,
           port_bindings,
           status,
           auto_restart,
@@ -558,7 +701,7 @@ export const createServerWorkload = async ({ user, input }) => {
         )
         VALUES (
           $1, $2, $3, 'server', $4, $5, $6, $7, $8, $9,
-          $10::jsonb, $11::jsonb, 'running', $12, $13, $14, $15
+          $10::jsonb, $11::jsonb, $12::jsonb, 'running', $13, $14, $15, $16
         )
         RETURNING *
       `,
@@ -573,6 +716,7 @@ export const createServerWorkload = async ({ user, input }) => {
         template.buildContext,
         directories.dataPath,
         JSON.stringify(envMap),
+        JSON.stringify(configMeta),
         JSON.stringify(bindings),
         parsed.autoRestart,
         parsed.memoryMb,
@@ -586,6 +730,157 @@ export const createServerWorkload = async ({ user, input }) => {
     await removeIfExists(directories.root);
     throw error;
   }
+};
+
+export const updateWorkloadSettings = async ({ workloadId, user, input }) => {
+  const workload = await getWorkloadById(workloadId);
+  assertOwnership(workload, user);
+
+  const parsed = updateWorkloadSchema.parse(input);
+  const name = parsed.name || workload.name;
+  const startupCommand = parsed.startupCommand === "" ? null : (parsed.startupCommand || workload.startup_command);
+  const currentEnv = workload.env || {};
+  const nextEnv = parsed.envLines !== undefined ? parseEnvLines(parsed.envLines || "") : currentEnv;
+  const memoryMb = parsed.memoryMb ?? workload.memory_mb;
+  const cpuLimit = parsed.cpuLimit ?? Number(workload.cpu_limit);
+  const storageMb = parsed.storageMb ?? workload.storage_mb;
+  const autoRestart = parsed.autoRestart ?? workload.auto_restart;
+  let configMeta = workload.config_meta || {};
+  let envMap = { ...nextEnv };
+
+  await assertWithinQuota({
+    user,
+    kind: workload.kind,
+    memoryMb,
+    cpuLimit,
+    storageMb,
+    excludeWorkloadId: workload.id
+  });
+
+  if (workload.kind === "bot") {
+    const sourceMeta = workload.source_path ? await detectBotConfig(workload.source_path) : {};
+    configMeta = {
+      ...configMeta,
+      ...sourceMeta,
+      tokenConfigured: configMeta.tokenConfigured || false
+    };
+
+    const tokenValue = parsed.token === "" ? "" : (parsed.token || "");
+
+    if (tokenValue) {
+      envMap = applyTokenToEnvMap(envMap, tokenValue, configMeta);
+      configMeta.tokenConfigured = true;
+    } else if (parsed.envLines !== undefined) {
+      const tokenKeys = configMeta.detectedTokenKeys?.length ? configMeta.detectedTokenKeys : ["TOKEN", "DISCORD_TOKEN"];
+
+      for (const key of tokenKeys) {
+        if (currentEnv[key]) {
+          envMap[key] = currentEnv[key];
+        }
+      }
+    }
+  } else {
+    const template = getTemplate(workload.template_key);
+    configMeta = {
+      ...(workload.config_meta || {}),
+      capabilities: template?.capabilities || {}
+    };
+  }
+
+  const { container, containerName } = await rebuildContainerForWorkload({
+    workload,
+    name,
+    envMap,
+    startupCommand,
+    memoryMb,
+    cpuLimit,
+    storageMb,
+    autoRestart
+  });
+
+  const result = await query(
+    `
+      UPDATE workloads
+      SET name = $2,
+          container_name = $3,
+          container_id = $4,
+          startup_command = $5,
+          env = $6::jsonb,
+          config_meta = $7::jsonb,
+          auto_restart = $8,
+          memory_mb = $9,
+          cpu_limit = $10,
+          storage_mb = $11,
+          status = 'running',
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      workloadId,
+      name,
+      containerName,
+      container.id,
+      startupCommand,
+      JSON.stringify(envMap),
+      JSON.stringify(configMeta),
+      autoRestart,
+      memoryMb,
+      cpuLimit,
+      storageMb
+    ]
+  );
+
+  return result.rows[0];
+};
+
+export const uploadWorkloadAsset = async ({ workloadId, user, file, assetType }) => {
+  if (!file) {
+    throw new ApiError(400, "Asset file is required.");
+  }
+
+  const workload = await getWorkloadById(workloadId);
+  assertOwnership(workload, user);
+
+  if (workload.kind !== "server") {
+    throw new ApiError(400, "Asset uploads are available only for game servers.");
+  }
+
+  const template = getTemplate(workload.template_key);
+
+  if (!template?.capabilities?.minecraft) {
+    throw new ApiError(400, "Asset uploads are currently available for Minecraft templates only.");
+  }
+
+  const targets = getMinecraftUploadTargets(template);
+  const selectedRelative = targets[assetType];
+
+  if (selectedRelative === undefined || selectedRelative === null) {
+    throw new ApiError(400, `Upload type "${assetType}" is not supported for this template.`);
+  }
+
+  const targetDir = path.join(workload.data_path, selectedRelative);
+  await ensureDir(targetDir);
+
+  const ext = path.extname(file.originalname).toLowerCase();
+
+  try {
+    if (ext === ".zip") {
+      await extractZipSafely(file.path, targetDir);
+    } else {
+      await copyFileInto(file.path, path.join(targetDir, file.originalname));
+    }
+
+    await applyRuntimeOwnership(workload.data_path, template.runtimeUid);
+  } finally {
+    await removeIfExists(file.path);
+  }
+
+  return {
+    success: true,
+    target: selectedRelative || "/",
+    uploaded: file.originalname
+  };
 };
 
 export const startWorkload = async ({ workloadId, user }) => {

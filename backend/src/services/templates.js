@@ -7,7 +7,7 @@ export const gameTemplates = {
   "minecraft-paper": {
     id: "minecraft-paper",
     name: "Minecraft Paper",
-    description: "Paper server with automatic download and persistent world data.",
+    description: "Paper server with automatic download, plugin support and persistent world data.",
     imageTag: "host-template-minecraft-paper:latest",
     buildContext: templatePath("minecraft-paper"),
     mountPath: "/srv/minecraft/data",
@@ -17,7 +17,14 @@ export const gameTemplates = {
       MINECRAFT_VERSION: "1.20.6",
       JAVA_MEMORY: "1024M"
     },
-    ports: [{ containerPort: 25565, protocol: "tcp", label: "Game" }]
+    ports: [{ containerPort: 25565, protocol: "tcp", label: "Game" }],
+    capabilities: {
+      minecraft: true,
+      plugins: true,
+      mods: false,
+      uploads: ["plugins", "world", "configs"]
+    },
+    runtimeUid: 20001
   },
   "minecraft-vanilla": {
     id: "minecraft-vanilla",
@@ -32,7 +39,37 @@ export const gameTemplates = {
       MINECRAFT_VERSION: "1.20.6",
       JAVA_MEMORY: "1024M"
     },
-    ports: [{ containerPort: 25565, protocol: "tcp", label: "Game" }]
+    ports: [{ containerPort: 25565, protocol: "tcp", label: "Game" }],
+    capabilities: {
+      minecraft: true,
+      plugins: false,
+      mods: false,
+      uploads: ["world", "configs"]
+    },
+    runtimeUid: 20002
+  },
+  "minecraft-fabric": {
+    id: "minecraft-fabric",
+    name: "Minecraft Fabric",
+    description: "Fabric server with mod support and persistent world data.",
+    imageTag: "host-template-minecraft-fabric:latest",
+    buildContext: templatePath("minecraft-fabric"),
+    mountPath: "/srv/minecraft/data",
+    defaultEnv: {
+      EULA: "TRUE",
+      MINECRAFT_FLAVOR: "fabric",
+      MINECRAFT_VERSION: "1.20.6",
+      FABRIC_LOADER_VERSION: "0.15.11",
+      JAVA_MEMORY: "2048M"
+    },
+    ports: [{ containerPort: 25565, protocol: "tcp", label: "Game" }],
+    capabilities: {
+      minecraft: true,
+      plugins: false,
+      mods: true,
+      uploads: ["mods", "world", "configs"]
+    },
+    runtimeUid: 20004
   },
   fivem: {
     id: "fivem",
@@ -50,7 +87,14 @@ export const gameTemplates = {
     ports: [
       { containerPort: 30120, protocol: "tcp", label: "Game TCP" },
       { containerPort: 30120, protocol: "udp", label: "Game UDP" }
-    ]
+    ],
+    capabilities: {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    },
+    runtimeUid: 20003
   },
   cs2: {
     id: "cs2",
@@ -73,7 +117,13 @@ export const gameTemplates = {
       { containerPort: 27015, protocol: "udp", label: "Game UDP" },
       { containerPort: 27015, protocol: "tcp", label: "Game TCP" },
       { containerPort: 27020, protocol: "udp", label: "TV UDP" }
-    ]
+    ],
+    capabilities: {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    }
   },
   rust: {
     id: "rust",
@@ -96,7 +146,13 @@ export const gameTemplates = {
     ports: [
       { containerPort: 28015, protocol: "udp", label: "Game UDP" },
       { containerPort: 28016, protocol: "udp", label: "Query UDP" }
-    ]
+    ],
+    capabilities: {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    }
   },
   terraria: {
     id: "terraria",
@@ -112,7 +168,13 @@ export const gameTemplates = {
       WORLD_FILE: "world.wld",
       MAX_PLAYERS: "8"
     },
-    ports: [{ containerPort: 7777, protocol: "tcp", label: "Game TCP" }]
+    ports: [{ containerPort: 7777, protocol: "tcp", label: "Game TCP" }],
+    capabilities: {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    }
   },
   valheim: {
     id: "valheim",
@@ -134,7 +196,13 @@ export const gameTemplates = {
       { containerPort: 2456, protocol: "udp", label: "Game UDP" },
       { containerPort: 2457, protocol: "udp", label: "Query UDP" },
       { containerPort: 2458, protocol: "udp", label: "Beacon UDP" }
-    ]
+    ],
+    capabilities: {
+      minecraft: false,
+      plugins: false,
+      mods: false,
+      uploads: []
+    }
   }
 };
 

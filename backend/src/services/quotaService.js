@@ -19,7 +19,7 @@ export const assertUserCanHost = (user) => {
   }
 };
 
-export const assertWithinQuota = async ({ user, kind, memoryMb, cpuLimit, storageMb }) => {
+export const assertWithinQuota = async ({ user, kind, memoryMb, cpuLimit, storageMb, excludeWorkloadId = null }) => {
   assertUserCanHost(user);
 
   const result = await query(
@@ -33,8 +33,9 @@ export const assertWithinQuota = async ({ user, kind, memoryMb, cpuLimit, storag
       FROM workloads
       WHERE user_id = $1
         AND status <> 'deleted'
+        AND ($2::uuid IS NULL OR id <> $2::uuid)
     `,
-    [user.id]
+    [user.id, excludeWorkloadId]
   );
 
   const totals = result.rows[0];

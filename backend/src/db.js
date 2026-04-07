@@ -44,6 +44,7 @@ export const migrate = async () => {
       data_path TEXT,
       startup_command TEXT,
       env JSONB NOT NULL DEFAULT '{}'::jsonb,
+      config_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
       port_bindings JSONB NOT NULL DEFAULT '[]'::jsonb,
       status TEXT NOT NULL DEFAULT 'created',
       auto_restart BOOLEAN NOT NULL DEFAULT true,
@@ -56,6 +57,7 @@ export const migrate = async () => {
     );
   `);
 
+  await query(`ALTER TABLE workloads ADD COLUMN IF NOT EXISTS config_meta JSONB NOT NULL DEFAULT '{}'::jsonb;`);
   await query(`CREATE INDEX IF NOT EXISTS idx_workloads_user_id ON workloads(user_id);`);
   await query(`CREATE INDEX IF NOT EXISTS idx_workloads_container_id ON workloads(container_id);`);
 };

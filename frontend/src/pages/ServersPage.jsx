@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext.jsx";
 import LogConsole from "../components/LogConsole.jsx";
@@ -19,6 +19,8 @@ export default function ServersPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     name: "",
     templateKey: "",
@@ -28,39 +30,25 @@ export default function ServersPage() {
     storageMb: "8192",
     autoRestart: true
   });
+  const [editor, setEditor] = useState({
+    name: "",
+    envLines: "",
+    memoryMb: "2048",
+    cpuLimit: "2",
+    storageMb: "8192",
+    autoRestart: true
+  });
+  const [assetForm, setAssetForm] = useState({
+    assetType: "plugins",
+    asset: null
+  });
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [templateResponse, workloadsResponse] = await Promise.all([api.get("/workloads/templates"), api.get("/workloads")]);
-        const nextTemplates = templateResponse.data.templates;
-        const servers = workloadsResponse.data.workloads.filter((item) => item.kind === "server");
-
-        setTemplates(nextTemplates);
-        setWorkloads(servers);
-
-        if (!form.templateKey && nextTemplates[0]) {
-          setForm((current) => ({
-            ...current,
-            templateKey: nextTemplates[0].id,
-            envLines: envObjectToLines(nextTemplates[0].defaultEnv)
-          }));
-        }
-
-        if (!selectedId && servers[0]) {
-          setSelectedId(servers[0].id);
-        }
-      } catch (requestError) {
-        setError(requestError.response?.data?.error || "Unable to load templates.");
-      }
-    };
-
-    load();
-    const intervalId = window.setInterval(load, 10000);
-    return () => window.clearInterval(intervalId);
-  }, [form.templateKey, selectedId]);
-
+  const selectedWorkload = useMemo(() => workloads.find((item) => item.id === selectedId) || null, [workloads, selectedId]);
   const activeTemplate = templates.find((item) => item.id === form.templateKey);
+  const selectedTemplate = selectedWorkload ? templates.find((item) => item.id === selectedWorkload.template_key) : null;
+  const selectedEndpoint = getEndpointAddress(getPrimaryBinding(selectedWorkload?.port_bindings || []));
+  const selectedEndpointList = getEndpointList(selectedWorkload?.port_bindings || []);
+  const uploadOptions = selectedTemplate?.capabilities?.uploads || [];
 
   const copyToClipboard = async (value) => {
     try {
@@ -83,6 +71,71 @@ export default function ServersPage() {
       setError("Unable to copy address.");
     }
   };
+
+  const loadServers = async (preserveSelection = true) => {
+    const [templateResponse, workloadsResponse] = await Promise.all([api.get("/workloads/templates"), api.get("/workloads")]);
+    const nextTemplates = templateResponse.data.templates;
+    const servers = workloadsResponse.data.workloads.filter((item) => item.kind === "server");
+
+    setTemplates(nextTemplates);
+    setWorkloads(servers);
+
+    if (!form.templateKey && nextTemplates[0]) {
+      setForm((current) => ({
+        ...current,
+        templateKey: nextTemplates[0].id,
+        envLines: envObjectToLines(nextTemplates[0].defaultEnv)
+      }));
+    }
+
+    if (!preserveSelection || !servers.some((item) => item.id === selectedId)) {
+      setSelectedId(servers[0]?.id || "");
+    }
+
+    return { nextTemplates, servers };
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        await loadServers();
+      } catch (requestError) {
+        setError(requestError.response?.data?.error || "Unable to load templates.");
+      }
+    };
+
+    load();
+    const intervalId = window.setInterval(load, 10000);
+    return () => window.clearInterval(intervalId);
+  }, [form.templateKey, selectedId]);
+
+  useEffect(() => {
+    if (!selectedWorkload) {
+      return;
+    }
+
+    setEditor({
+      name: selectedWorkload.name,
+      envLines: envObjectToLines(selectedWorkload.env || {}),
+      memoryMb: String(selectedWorkload.memory_mb || 2048),
+      cpuLimit: String(selectedWorkload.cpu_limit || 2),
+      storageMb: String(selectedWorkload.storage_mb || 8192),
+      autoRestart: Boolean(selectedWorkload.auto_restart)
+    });
+  }, [selectedWorkload]);
+
+  useEffect(() => {
+    if (!uploadOptions.length) {
+      setAssetForm({ assetType: "plugins", asset: null });
+      return;
+    }
+
+    setAssetForm((current) => ({
+      ...current,
+      assetType: uploadOptions.includes(current.assetType) ? current.assetType : uploadOptions[0],
+      asset: null
+    }));
+  }, [selectedTemplate?.id]);
 
   const handleTemplateChange = (templateKey) => {
     const template = templates.find((item) => item.id === templateKey);
@@ -120,9 +173,7 @@ export default function ServersPage() {
         autoRestart: true
       }));
 
-      const response = await api.get("/workloads");
-      const servers = response.data.workloads.filter((item) => item.kind === "server");
-      setWorkloads(servers);
+      const { servers } = await loadServers(false);
       if (servers[0]) {
         setSelectedId(servers[0].id);
       }
@@ -146,15 +197,74 @@ export default function ServersPage() {
         setNotice(`Server ${action} command sent.`);
       }
 
-      const response = await api.get("/workloads");
-      const servers = response.data.workloads.filter((item) => item.kind === "server");
-      setWorkloads(servers);
-
-      if (selectedId === workloadId && !servers.some((item) => item.id === workloadId)) {
-        setSelectedId(servers[0]?.id || "");
-      }
+      await loadServers();
     } catch (requestError) {
       setError(requestError.response?.data?.error || `Unable to ${action} server.`);
+    }
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+
+    if (!selectedWorkload) {
+      return;
+    }
+
+    setSaving(true);
+    setNotice("");
+    setError("");
+
+    try {
+      await api.patch(`/workloads/${selectedWorkload.id}`, {
+        name: editor.name,
+        envLines: editor.envLines,
+        memoryMb: Number(editor.memoryMb),
+        cpuLimit: Number(editor.cpuLimit),
+        storageMb: Number(editor.storageMb),
+        autoRestart: editor.autoRestart
+      });
+
+      setNotice("Server settings updated and container recreated.");
+      await loadServers();
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || "Unable to update server.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAssetUpload = async (event) => {
+    event.preventDefault();
+
+    if (!selectedWorkload || !assetForm.asset) {
+      setError("Choose a server asset first.");
+      return;
+    }
+
+    setUploading(true);
+    setNotice("");
+    setError("");
+
+    try {
+      const payload = new FormData();
+      payload.append("assetType", assetForm.assetType);
+      payload.append("asset", assetForm.asset);
+
+      const response = await api.post(`/workloads/${selectedWorkload.id}/assets`, payload, {
+        headers: {
+          "Content-Type": "multipart/form-data"
+        }
+      });
+
+      setNotice(`Uploaded ${response.data.uploaded} to ${response.data.target || "/"}.`);
+      setAssetForm((current) => ({
+        ...current,
+        asset: null
+      }));
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || "Unable to upload Minecraft asset.");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -163,7 +273,7 @@ export default function ServersPage() {
       <header className="page-header">
         <div>
           <h1>Game servers</h1>
-          <p>Provision real server containers from curated templates. Each one gets its own LAN join address you can copy straight from the panel.</p>
+          <p>Provision real server containers from curated templates. Minecraft templates now expose a friendlier join flow plus plugin and mod uploads directly from the panel.</p>
         </div>
       </header>
 
@@ -171,48 +281,34 @@ export default function ServersPage() {
       {error ? <div className="notice error">{error}</div> : null}
 
       <section className="server-grid">
-        {workloads.slice(0, 3).map((workload) => {
-          const primaryBinding = getPrimaryBinding(workload.port_bindings || []);
-          const endpoint = getEndpointAddress(primaryBinding);
-
-          return (
-            <article key={workload.id} className="server-card">
+        {templates
+          .filter((template) => template.capabilities?.minecraft)
+          .slice(0, 3)
+          .map((template) => (
+            <article key={template.id} className="server-card">
               <div className="server-card-top">
                 <div>
-                  <span className="eyebrow">{workload.template_key}</span>
-                  <h3>{workload.name}</h3>
+                  <span className="eyebrow">Minecraft</span>
+                  <h3>{template.name}</h3>
                 </div>
-                <span className={statusClass(workload.status)}>{workload.status}</span>
               </div>
 
-              <div className="server-endpoint mono">{endpoint || "No public port yet"}</div>
-              <p>{endpoint ? "Players on your network can join using this address." : "This server has no exposed join port yet."}</p>
-
-              <div className="button-row">
-                <button type="button" className="button" onClick={() => endpoint && copyToClipboard(endpoint)} disabled={!endpoint}>
-                  Copy address
-                </button>
-                <button type="button" className="button button-ghost" onClick={() => setSelectedId(workload.id)}>
-                  Open logs
-                </button>
+              <div className="server-endpoint mono">{template.capabilities?.plugins ? "Plugins ready" : template.capabilities?.mods ? "Mods ready" : "Vanilla setup"}</div>
+              <p>{template.description}</p>
+              <div className="hero-pills">
+                {template.capabilities?.plugins ? <span className="hero-pill">Plugins</span> : null}
+                {template.capabilities?.mods ? <span className="hero-pill">Mods</span> : null}
+                <span className="hero-pill">Join IP after create</span>
               </div>
             </article>
-          );
-        })}
-        {workloads.length === 0 ? (
-          <article className="server-card server-card-empty">
-            <span className="eyebrow">No servers yet</span>
-            <h3>Create your first private server</h3>
-            <p>As soon as one is provisioned, its LAN join address will appear here.</p>
-          </article>
-        ) : null}
+          ))}
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
             <h3>Create server</h3>
-            <p>The backend builds template images on demand, then provisions a container with Docker resource limits and auto-assigned public ports.</p>
+            <p>Paper is ideal for plugins. Fabric is ready for mod uploads. The panel will show the join IP right after provisioning.</p>
           </div>
         </div>
 
@@ -240,6 +336,11 @@ export default function ServersPage() {
               <strong>{activeTemplate.name}</strong>
               <div className="muted">{activeTemplate.description}</div>
               <div className="mono">Ports: {activeTemplate.ports.map((item) => `${item.containerPort}/${item.protocol}`).join(", ")}</div>
+              {activeTemplate.capabilities?.minecraft ? (
+                <div className="muted">
+                  Minecraft uploads: {(activeTemplate.capabilities?.uploads || []).join(", ") || "none"}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -289,7 +390,7 @@ export default function ServersPage() {
         <div className="panel-header">
           <div>
             <h3>Provisioned servers</h3>
-            <p>Every template runs in a dedicated container with public port bindings and persistent host-mounted data.</p>
+            <p>Click a server to manage settings, copy its join address and upload Minecraft plugins or mods when supported.</p>
           </div>
         </div>
 
@@ -313,46 +414,40 @@ export default function ServersPage() {
 
               return (
                 <tr key={workload.id}>
-                <td className="stack">
-                  <strong>{workload.name}</strong>
-                  <span className="mono muted">{workload.container_name}</span>
-                </td>
-                <td>{workload.template_key}</td>
-                <td>
-                  <span className={statusClass(workload.status)}>{workload.status}</span>
-                </td>
-                <td className="mono">{formatPorts(workload.port_bindings)}</td>
-                <td className="stack">
-                  <strong className="mono">{endpoint || "No join address"}</strong>
-                  {endpointList.slice(1).map((item) => (
-                    <span key={`${workload.id}-${item.hostPort}-${item.protocol}`} className="mono muted">
-                      {item.address}
-                    </span>
-                  ))}
-                </td>
-                <td>{workload.memory_mb} MB / {Number(workload.cpu_limit).toFixed(2)} CPU / {workload.storage_mb} MB</td>
-                <td>
-                  <div className="inline-actions">
-                    <button type="button" className="button" onClick={() => endpoint && copyToClipboard(endpoint)} disabled={!endpoint}>
-                      Copy IP
-                    </button>
-                    <button type="button" className="button button-ghost" onClick={() => setSelectedId(workload.id)}>
-                      Logs
-                    </button>
-                    <button type="button" className="button button-success" onClick={() => runAction("start", workload.id)}>
-                      Start
-                    </button>
-                    <button type="button" className="button button-ghost" onClick={() => runAction("stop", workload.id)}>
-                      Stop
-                    </button>
-                    <button type="button" className="button button-ghost" onClick={() => runAction("restart", workload.id)}>
-                      Restart
-                    </button>
-                    <button type="button" className="button button-danger" onClick={() => runAction("delete", workload.id)}>
-                      Delete
-                    </button>
-                  </div>
-                </td>
+                  <td className="stack">
+                    <strong>{workload.name}</strong>
+                    <span className="mono muted">{workload.container_name}</span>
+                  </td>
+                  <td>{workload.template_key}</td>
+                  <td>
+                    <span className={statusClass(workload.status)}>{workload.status}</span>
+                  </td>
+                  <td className="mono">{formatPorts(workload.port_bindings)}</td>
+                  <td className="stack">
+                    <strong className="mono">{endpoint || "No join address"}</strong>
+                    {endpointList.slice(1).map((item) => (
+                      <span key={`${workload.id}-${item.hostPort}-${item.protocol}`} className="mono muted">
+                        {item.address}
+                      </span>
+                    ))}
+                  </td>
+                  <td>{workload.memory_mb} MB / {Number(workload.cpu_limit).toFixed(2)} CPU / {workload.storage_mb} MB</td>
+                  <td>
+                    <div className="inline-actions">
+                      <button type="button" className="button" onClick={() => setSelectedId(workload.id)}>
+                        Manage
+                      </button>
+                      <button type="button" className="button button-ghost" onClick={() => endpoint && copyToClipboard(endpoint)} disabled={!endpoint}>
+                        Copy IP
+                      </button>
+                      <button type="button" className="button button-ghost" onClick={() => runAction("restart", workload.id)}>
+                        Restart
+                      </button>
+                      <button type="button" className="button button-danger" onClick={() => runAction("delete", workload.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
@@ -364,6 +459,130 @@ export default function ServersPage() {
           </tbody>
         </table>
       </section>
+
+      {selectedWorkload ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h3>Manage server</h3>
+              <p>Manage <strong>{selectedWorkload.name}</strong>, copy the join IP and upload Minecraft assets without touching SSH.</p>
+            </div>
+          </div>
+
+          <div className="server-grid">
+            <article className="server-card">
+              <span className="eyebrow">Join address</span>
+              <h3>{selectedWorkload.name}</h3>
+              <div className="server-endpoint mono">{selectedEndpoint || "No public join port yet"}</div>
+              <p>Use this address from any device in your local network. Additional ports are listed below if the template exposes more than one.</p>
+              <div className="button-row">
+                <button type="button" className="button" onClick={() => selectedEndpoint && copyToClipboard(selectedEndpoint)} disabled={!selectedEndpoint}>
+                  Copy address
+                </button>
+              </div>
+            </article>
+
+            <article className="server-card">
+              <span className="eyebrow">Minecraft uploads</span>
+              <h3>{selectedTemplate?.name || selectedWorkload.template_key}</h3>
+              <p>
+                {selectedTemplate?.capabilities?.plugins
+                  ? "This template supports plugin uploads."
+                  : selectedTemplate?.capabilities?.mods
+                    ? "This template supports mod uploads."
+                    : "This template is focused on vanilla-style management."}
+              </p>
+              <div className="hero-pills">
+                {(selectedTemplate?.capabilities?.uploads || []).map((upload) => (
+                  <span key={upload} className="hero-pill">{upload}</span>
+                ))}
+              </div>
+            </article>
+          </div>
+
+          <form className="page-grid" onSubmit={handleSave}>
+            <div className="form-grid">
+              <label className="field">
+                <span>Name</span>
+                <input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} required />
+              </label>
+
+              <label className="field">
+                <span>Environment variables</span>
+                <textarea value={editor.envLines} onChange={(event) => setEditor({ ...editor, envLines: event.target.value })} />
+              </label>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-grid-three">
+                <label className="field">
+                  <span>RAM (MB)</span>
+                  <input type="number" min="512" value={editor.memoryMb} onChange={(event) => setEditor({ ...editor, memoryMb: event.target.value })} />
+                </label>
+
+                <label className="field">
+                  <span>CPU</span>
+                  <input type="number" step="0.25" min="0.5" value={editor.cpuLimit} onChange={(event) => setEditor({ ...editor, cpuLimit: event.target.value })} />
+                </label>
+
+                <label className="field">
+                  <span>Storage (MB)</span>
+                  <input type="number" min="1024" value={editor.storageMb} onChange={(event) => setEditor({ ...editor, storageMb: event.target.value })} />
+                </label>
+              </div>
+
+              <label className="field">
+                <span>Auto restart</span>
+                <select value={String(editor.autoRestart)} onChange={(event) => setEditor({ ...editor, autoRestart: event.target.value === "true" })}>
+                  <option value="true">unless-stopped</option>
+                  <option value="false">disabled</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="button-row">
+              <button type="submit" className="button" disabled={saving}>
+                {saving ? "Saving..." : "Save settings"}
+              </button>
+            </div>
+          </form>
+
+          {selectedTemplate?.capabilities?.minecraft ? (
+            <form className="page-grid" onSubmit={handleAssetUpload}>
+              <div className="panel-header">
+                <div>
+                  <h3>Minecraft assets</h3>
+                  <p>Upload plugin jars, mod jars, worlds or config bundles directly into the correct data folders for this template.</p>
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <label className="field">
+                  <span>Upload type</span>
+                  <select value={assetForm.assetType} onChange={(event) => setAssetForm({ ...assetForm, assetType: event.target.value })}>
+                    {uploadOptions.map((upload) => (
+                      <option key={upload} value={upload}>
+                        {upload}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>File (.jar / .zip / config)</span>
+                  <input type="file" onChange={(event) => setAssetForm({ ...assetForm, asset: event.target.files?.[0] || null })} />
+                </label>
+              </div>
+
+              <div className="button-row">
+                <button type="submit" className="button" disabled={uploading || !assetForm.asset}>
+                  {uploading ? "Uploading..." : "Upload asset"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
 
       <LogConsole token={token} workloadId={selectedId} />
     </div>
