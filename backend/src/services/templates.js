@@ -8,7 +8,7 @@ export const gameTemplates = {
     id: "minecraft-paper",
     name: "Minecraft Paper",
     description: "Paper server with automatic download, plugin support and persistent world data.",
-    imageTag: "host-template-minecraft-paper:v2",
+    imageTag: "host-template-minecraft-paper:v3",
     buildContext: templatePath("minecraft-paper"),
     mountPath: "/srv/minecraft/data",
     defaultEnv: {
@@ -30,7 +30,7 @@ export const gameTemplates = {
     id: "minecraft-vanilla",
     name: "Minecraft Vanilla",
     description: "Vanilla Minecraft server with persistent data volume.",
-    imageTag: "host-template-minecraft-vanilla:v2",
+    imageTag: "host-template-minecraft-vanilla:v3",
     buildContext: templatePath("minecraft-vanilla"),
     mountPath: "/srv/minecraft/data",
     defaultEnv: {
@@ -52,7 +52,7 @@ export const gameTemplates = {
     id: "minecraft-fabric",
     name: "Minecraft Fabric",
     description: "Fabric server with mod support and persistent world data.",
-    imageTag: "host-template-minecraft-fabric:v2",
+    imageTag: "host-template-minecraft-fabric:v3",
     buildContext: templatePath("minecraft-fabric"),
     mountPath: "/srv/minecraft/data",
     defaultEnv: {
