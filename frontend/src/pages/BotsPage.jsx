@@ -217,6 +217,7 @@ export default function BotsPage() {
           <div className="hero-pills">
             <span className="hero-pill">Node.js auto-detect</span>
             <span className="hero-pill">Python auto-detect</span>
+            <span className="hero-pill">Wrapper folder support</span>
             <span className="hero-pill">Edit after click</span>
           </div>
         </div>
@@ -365,6 +366,7 @@ export default function BotsPage() {
               <h3>{selectedWorkload.runtime}</h3>
               <p>Auto startup: <span className="mono">{selectedWorkload.config_meta?.autoDetectedStartup || selectedWorkload.startup_command || "n/a"}</span></p>
               <p>Entry file: <span className="mono">{selectedWorkload.config_meta?.detectedEntryFile || "auto"}</span></p>
+              <p>Project root: <span className="mono">{selectedWorkload.config_meta?.detectedProjectRoot || "."}</span></p>
               <div className="server-endpoint mono">{(selectedWorkload.config_meta?.detectedTokenKeys || []).join(", ") || "TOKEN"}</div>
               <p>These token-like keys were detected while scanning the archive.</p>
             </article>

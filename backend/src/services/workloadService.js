@@ -527,7 +527,8 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
     await applyRuntimeOwnership(directories.dataPath, 10001);
 
     const detected = await detectRuntime(directories.sourcePath);
-    const detectedBotConfig = await detectBotConfig(directories.sourcePath);
+    const sourceRootPath = detected.projectRoot || directories.sourcePath;
+    const detectedBotConfig = await detectBotConfig(sourceRootPath);
     const runtime = detected.runtime;
     const startupCommand = parsed.startupCommand || detected.startupCommand;
     const initialEnvMap = parseEnvLines(parsed.envLines || "");
@@ -541,15 +542,16 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
       detectedRuntime: runtime,
       autoDetectedStartup: detected.startupCommand,
       detectedEntryFile: detected.entryFile,
+      detectedProjectRoot: detected.projectRootRelative || ".",
       tokenConfigured: Boolean(fallbackToken)
     };
 
-    await writeTextFile(path.join(directories.sourcePath, "Dockerfile"), dockerfile);
-    await writeTextFile(path.join(directories.sourcePath, ".dockerignore"), "node_modules\n__pycache__\n.git\n");
+    await writeTextFile(path.join(sourceRootPath, "Dockerfile"), dockerfile);
+    await writeTextFile(path.join(sourceRootPath, ".dockerignore"), "node_modules\n__pycache__\n.git\n");
 
     const image = `host-bot-${workloadId}:latest`;
     await buildImage({
-      contextPath: directories.sourcePath,
+      contextPath: sourceRootPath,
       tag: image
     });
 
@@ -608,7 +610,7 @@ export const createBotWorkload = async ({ user, input, archiveFile }) => {
         containerName,
         container.id,
         archiveFile.originalname,
-        directories.sourcePath,
+        sourceRootPath,
         directories.dataPath,
         startupCommand,
         JSON.stringify(envMap),
