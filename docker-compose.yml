@@ -35,8 +35,8 @@ services:
       DOCKER_NETWORK_NAME: hosting-runtime
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runtime:/srv/runtime
-      - ./game-images:/srv/templates:ro
+      - ./runtime:${RUNTIME_ROOT}
+      - ./game-images:${TEMPLATE_IMAGES_ROOT}:ro
     depends_on:
       postgres:
         condition: service_healthy
